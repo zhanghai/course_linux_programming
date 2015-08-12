@@ -1,0 +1,11 @@
+#define REDIRECT_INPUT_FROM_FILE        1
+#define ARGUMENT                        2
+#define REDIRECT_INPUT_FROM_FILE_DESCRIPTOR  3
+#define REDIRECT_OUTPUT_TO_FILE         4
+#define REDIRECT_OUTPUT_TO_FILE_DESCRIPTOR  5
+#define REDIRECT_OUTPUT_APPEND_TO_FILE  6
+#define PIPE                            7
+#define OR                              8
+#define AND                             9
+#define BACKGROUND                     10
+#define SEMICOLON                      11
