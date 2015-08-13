@@ -105,9 +105,11 @@ Shell 总是有三个默认的文件描述符：标准输入（0）、标准输�
 
 本 Shell 使用 flex 和 lemon 进行语法分析，因此构建时需要两者作为依赖已经安装。
 
-本 Shell 使用 CMake 进行构建，因此构建时需要其作为依赖已经安装。
+本 Shell 在开发时使用 CMake 进行构建，因此构建时可以将其作为依赖安装。
 
 安装 flex、lemon 和 CMake 后，使用`cmake . && make`命令进行编译即可。
+
+如果没有安装 CMake，也可以使用本 Shell 附带的 Makefile。使用`make`命令进行编译即可。
 
 ## 实现
 
