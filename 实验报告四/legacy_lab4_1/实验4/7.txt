@@ -1,0 +1,25 @@
+a. CC OPTIONS OBJECTS SOURCES HEADERS
+
+b. power main.o stack.o misc.o
+
+c. power: main.c main.o stack.o misc.o
+   main.o: main.c main.h misc.h
+   stack.o stack.c stack.h misc.h
+   misc.o: misc.c misc.h
+
+d. power: gcc -O3 -o power main.o stack.o misc.o -lm
+   main.o: gcc -c main.c main.h misc.h
+   stack.o: gcc -c stack.c stack.h misc.h
+   misc.o: gcc -c misc.c misc.h
+
+e.                             power
+                      /          |       \
+           /                     |                \
+       main.o                  stack.o           misc.o
+      /  |   \               /   |   \           /    \
+main.c main.h misc.h  stack.c stack.h misc.h  misc.c misc.h
+
+f. main.o: gcc -c main.c main.h misc.h
+   stack.o: gcc -c stack.c stack.h misc.h
+   misc.o: gcc -c misc.c misc.h
+   由 makefile 隐式规则推到得到。

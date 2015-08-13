@@ -1,0 +1,3 @@
+$ gcc -c main.c input.c compute.c
+$ gcc main.o input.o compute.o -o power -lm
+$
