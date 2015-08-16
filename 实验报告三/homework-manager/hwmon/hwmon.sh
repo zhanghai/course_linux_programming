@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# hwmon.sh: Script for homework manager.
+# hwmon.sh: Script for homework management.
 #
 # Copyright (c) 2014 Zhang Hai <Dreaming.in.Code.ZH@Gmail.com>
 #
@@ -19,28 +19,41 @@
 # <http://www.gnu.org/licenses/>.
 #
 
+# 常量
+
 DIALOG=zenity
 
-name=$(basename "$0")
+# 变量
 
 account_type=
 username=
+course_id=
 
-usage() {
-    # TODO
-    cat <<EOF
-Usage: ${name} [OPTIONS]
+# 错误报告函数
 
-Options:
-
-  -d, --disconnect          Disconnect from ZJU VPN
-  -h, --help                Display this help and exit
-  -l, --lac-conf=NAME       Use LAC configuration NAME; the default
-                            configuration name is ${XL2TPD_LAC_CONF_DEFAULT}
-  -t, --timeout=SECONDS     Time out after SECONDS; the default timeout is
-                            ${TIMEOUT_DEFAULT}
-EOF
+error() {
+    dialog-error "$1"
+    echo "$1" >&2
+    return 1
 }
+
+error-if-empty() {
+    if [[ -z "$1" ]]; then
+        error "$2"
+        return 1
+    fi
+    return 0
+}
+
+error-if-not-empty() {
+    if [[ -n "$1" ]]; then
+        error "$2"
+        return 1
+    fi
+    return 0
+}
+
+# 对话框函数
 
 dialog-info() {
     "${DIALOG}" --info --title="信息" --text="$1"
@@ -78,98 +91,82 @@ dialog-entry() {
     "${DIALOG}" --entry --title="$1" --text="$2" "${@:3}"
 }
 
-error() {
-    dialog-error "$1"
-    echo "$1" >&2
-    return 1
-}
-
-error-exit() {
-    error "$1"
-    exit 1
-}
-
-error-if-empty() {
-    if [[ -z "$1" ]]; then
-        error "$2"
-        return 1
-    fi
-    return 0
-}
-
-error-exit-if-empty() {
-    if [[ -z "$1" ]]; then
-        error "$2"
-        exit 1
-    fi
-    return 0
-}
-
-error-if-not-empty() {
-    if [[ -n "$1" ]]; then
-        error "$2"
-        return 1
-    fi
-    return 0
-}
-
-error-exit-if-not-empty() {
-    if [[ -n "$1" ]]; then
-        error "$2"
-        exit 1
-    fi
-    return 0
-}
+# 登录
 
 login() {
 
-    # Read account type.
-    account_type=$(dialog-select '登录作业管理系统' '请选择账户类型：' '管理员' '教师' '学生')
-    local account_file
-    case "${account_type}" in
-        '管理员')
-            account_file='admintab'
-            ;;
-        '教师')
-            account_file='teachertab'
-            ;;
-        '学生')
-            account_file='studenttab'
-            ;;
-        '')
-            return 0
-            ;;
-        *)
-            error-exit '未预期的账户类型'
-            ;;
-    esac
+    while true; do
+        # 读取账户类型
+        account_type=$(dialog-select '登录作业管理系统' '请选择账户类型：' '管理员' '教师' '学生')
+        local account_file
+        case "${account_type}" in
+            '管理员')
+                account_file='admintab'
+                ;;
+            '教师')
+                account_file='teachertab'
+                ;;
+            '学生')
+                # account_file will be set later.
+                ;;
+            '')
+                return 1
+                ;;
+            *)
+                error '未预期的账户类型：${account_type}'
+                continue
+                ;;
+        esac
 
-    # Read username and password.
-    local username_password
-    username_password=$(dialog-login "${account_type}登录")
-    error-exit-if-empty "${username_password}" '用户名密码为空'
-    username=$(echo "${username_password}" | cut -d'|' -f1)
-    local password
-    password=$(echo "${username_password}" | cut -d'|' -f2)
+        while true; do
+            # 读取用户名和密码
+            local username_password
+            if ! username_password=$(dialog-login "${account_type}登录"); then
+                break
+            fi
+            if ! error-if-empty "${username_password}" '用户名密码为空'; then
+                continue
+            fi
+            username=$(echo "${username_password}" | cut -d'|' -f1)
+            if [[ "${account_type}" = "学生" ]]; then
+                if ! (echo "${username}" | grep '/'); then
+                    error '学生用户名应为“课号/学号”形式'
+                    continue
+                fi
+                course_id=$(echo "${username}" | cut -d'/' -f1)
+                if ! error-if-empty "${course_id}" '学生用户名中课号为空'; then
+                    continue
+                fi
+                username=$(echo "${username}" | cut -d'/' -f2)
+                if ! error-if-empty "${username}" '学生用户名中学号为空'; then
+                    continue
+                fi
+                account_file="course.d/${course_id}/studenttab"
+            fi
+            local password
+            password=$(echo "${username_password}" | cut -d'|' -f2)
 
-    # Authenticate.
-    touch "${account_file}"
-    while IFS='	' read file_username file_realname file_password; do
-        if [[ "${file_username}" = "${username}" ]] && [[ "${file_password}" = "${password}" ]]; then
-            echo "${account_type}"
-            return 0
-        fi
-    done <"${account_file}"
-    error-exit '用户名、密码或账户类型错误'
+            # 验证用户名和密码
+            touch "${account_file}"
+            while IFS='	' read file_username file_realname file_password; do
+                if [[ "${file_username}" = "${username}" ]] && [[ "${file_password}" = "${password}" ]]; then
+                    return 0
+                fi
+            done <"${account_file}"
+            error '用户名、密码或账户类型错误'
+        done
+    done
 }
+
+# 管理员功能
 
 admin-manage-teacher() {
     touch teachertab
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理教师账户' '请选择操作：' '新建教师账户' '查看教师账户列表' '编辑教师账户' '删除教师账户')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '新建教师账户')
                 local teacher
@@ -177,6 +174,7 @@ admin-manage-teacher() {
                 if [[ -z "${teacher}" ]]; then
                     continue
                 fi
+                local id
                 id=$(echo ${teacher} | cut -d'	' -f1)
                 if [[ -z "${id}" ]]; then
                     error '教师账户工号为空'
@@ -193,10 +191,12 @@ admin-manage-teacher() {
                 dialog-list '查看教师账户列表' '教师账户列表：' --column='工号' --column='姓名' --column='密码' $(cat teachertab)
                 ;;
             '编辑教师账户')
+                local id
                 id=$(dialog-list '编辑教师账户' '选择教师账户：' --column='工号' --column='姓名' --column='密码' $(cat teachertab))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
+                local name_password
                 name_password=$(dialog-form '编辑教师账户' "工号 ${id}" --add-entry='姓名' --add-password='密码')
                 if [[ -z "${name_password}" ]]; then
                     continue
@@ -236,10 +236,10 @@ admin-manage-teacher() {
 admin-manage-course() {
     touch coursetab
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理课程' '请选择操作：' '新建课程' '查看课程列表' '编辑课程' '删除课程')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '新建课程')
                 local course
@@ -247,6 +247,7 @@ admin-manage-course() {
                 if [[ -z "${course}" ]]; then
                     continue
                 fi
+                local id
                 id=$(echo ${course} | cut -d'	' -f1)
                 if [[ -z "${id}" ]]; then
                     error '课程课号为空'
@@ -268,6 +269,7 @@ admin-manage-course() {
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
+                local name_teacher
                 name_teacher=$(dialog-form '编辑课程' "课号 ${id}" --add-entry='名称' --add-entry='教师工号')
                 if [[ -z "${name_teacher}" ]]; then
                     continue
@@ -307,10 +309,10 @@ admin-manage-course() {
 
 admin-main() {
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理员操作' '请选择操作：' '管理教师账户' '管理课程')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '管理教师账户')
                 admin-manage-teacher
@@ -330,13 +332,15 @@ admin-main() {
     return 0
 }
 
+# 教师功能
+
 teacher-manage-course() {
     touch coursetab
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理课程' '请选择操作：' '新建课程' '查看课程列表' '编辑课程' '删除课程')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '新建课程')
                 local course
@@ -361,10 +365,12 @@ teacher-manage-course() {
                 dialog-list '查看课程列表' '课程列表：' --column='课号' --column='名称' --column='教师工号' $(grep "	${username}$" coursetab)
                 ;;
             '编辑课程')
+                local id
                 id=$(dialog-list '编辑课程' '请选择课程：' --column='课号' --column='名称' --column='教师工号' $(grep "	${username}$" coursetab))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
+                local name
                 name=$(dialog-form '编辑课程' "课号 ${id}" --add-entry='名称')
                 if [[ -z "${name}" ]]; then
                     continue
@@ -383,7 +389,7 @@ teacher-manage-course() {
                 if ! dialog-confirm "确定要删除课号为 ${id} 的课程么？"; then
                     continue
                 fi
-                if sed -i "/^${id}	.*$/d" coursetab && rm -r "${id}"; then
+                if sed -i "/^${id}	.*$/d" coursetab && rm -r "course.d/${id}"; then
                     dialog-info "删除课程成功"
                 else
                     error "删除课程失败"
@@ -408,12 +414,12 @@ teacher-manage-student() {
         return 0
     fi
     mkdir -p "${course_id}"
-    touch "${course_id}/studenttab"
+    touch "course.d/${course_id}/studenttab"
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理学生账户' '请选择操作：' '新建学生账户' '查看学生账户列表' '编辑学生账户' '删除学生账户')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '新建学生账户')
                 local student
@@ -421,45 +427,48 @@ teacher-manage-student() {
                 if [[ -z "${student}" ]]; then
                     continue
                 fi
+                local id
                 id=$(echo ${student} | cut -d'	' -f1)
                 if [[ -z "${id}" ]]; then
                     error '学生账户学号为空'
                     continue
                 fi
-                if grep "^${id}	" "${course_id}/studenttab"; then
+                if grep "^${id}	" "course.d/${course_id}/studenttab"; then
                     error "学号为 ${id} 的学生账户已经存在"
                     continue
                 fi
-                echo "${student}" >>"${course_id}/studenttab"
+                echo "${student}" >>"course.d/${course_id}/studenttab"
                 dialog-info '新建学生账户成功'
                 ;;
             '查看学生账户列表')
-                dialog-list '查看学生账户列表' '学生账户列表：' --column='学号' --column='姓名' --column='密码' $(cat "${course_id}/studenttab")
+                dialog-list '查看学生账户列表' '学生账户列表：' --column='学号' --column='姓名' --column='密码' $(cat "course.d/${course_id}/studenttab")
                 ;;
             '编辑学生账户')
-                id=$(dialog-list '编辑学生账户' '选择学生账户：' --column='学号' --column='姓名' --column='密码' $(cat "${course_id}/studenttab"))
+                local id
+                id=$(dialog-list '编辑学生账户' '选择学生账户：' --column='学号' --column='姓名' --column='密码' $(cat "course.d/${course_id}/studenttab"))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
+                local name_password
                 name_password=$(dialog-form '编辑学生账户' "学号 ${id}" --add-entry='姓名' --add-password='密码')
                 if [[ -z "${name_password}" ]]; then
                     continue
                 fi
-                if sed -i "s/^${id}	.*$/${id}	${name_password}/" "${course_id}/studenttab"; then
+                if sed -i "s/^${id}	.*$/${id}	${name_password}/" "course.d/${course_id}/studenttab"; then
                     dialog-info "编辑学生账户成功"
                 else
                     error "编辑学生账户失败"
                 fi
                 ;;
             '删除学生账户')
-                id=$(dialog-list '删除学生账户' '选择学生账户：' --column='学号' --column='姓名' --column='密码' $(cat "${course_id}/studenttab"))
+                id=$(dialog-list '删除学生账户' '选择学生账户：' --column='学号' --column='姓名' --column='密码' $(cat "course.d/${course_id}/studenttab"))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
                 if ! dialog-confirm "确定要删除学号为 ${id} 的学生账户么？"; then
                     continue
                 fi
-                if sed -i "/^${id}	.*$/d" "${course_id}/studenttab"; then
+                if sed -i "/^${id}	.*$/d" "course.d/${course_id}/studenttab"; then
                     dialog-info "删除学生账户成功"
                 else
                     error "删除学生账户失败"
@@ -484,12 +493,12 @@ teacher-manage-homework() {
         return 0
     fi
     mkdir -p "${course_id}"
-    touch "${course_id}/homeworktab"
+    touch "course.d/${course_id}/homeworktab"
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '管理作业' '请选择操作：' '新建作业' '查看作业列表' '查看作业完成情况' '编辑作业' '删除作业')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '新建作业')
                 local homework
@@ -497,53 +506,58 @@ teacher-manage-homework() {
                 if [[ -z "${homework}" ]]; then
                     continue
                 fi
+                local id
                 id=$(echo ${homework} | cut -d'	' -f1)
                 if [[ -z "${id}" ]]; then
                     error '作业号为空'
                     continue
                 fi
-                if grep "^${id}	" "${course_id}/homeworktab"; then
+                if grep "^${id}	" "course.d/${course_id}/homeworktab"; then
                     error "作业号为 ${id} 的作业已经存在"
                     continue
                 fi
-                echo "${homework}" >>"${course_id}/homeworktab"
+                echo "${homework}" >>"course.d/${course_id}/homeworktab"
                 dialog-info '新建作业成功'
                 ;;
             '查看作业列表')
-                dialog-list '查看作业' '作业列表：' --column='作业号' --column='名称' $(cat "${course_id}/homeworktab")
+                dialog-list '查看作业' '作业列表：' --column='作业号' --column='名称' $(cat "course.d/${course_id}/homeworktab")
                 ;;
             '查看作业完成情况')
-                id=$(dialog-list '编辑作业' '选择作业：' --column='作业号' --column='名称' $(cat "${course_id}/homeworktab"))
+                local id
+                id=$(dialog-list '编辑作业' '选择作业：' --column='作业号' --column='名称' $(cat "course.d/${course_id}/homeworktab"))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
-                touch "${course_id}/${id}"
-                dialog-list '查看作业完成情况' '作业完成情况：' --column='学号' --column='作业内容' $(cat "${course_id}/${id}")
+                touch "course.d/${course_id}/homework.d/${id}"
+                dialog-list '查看作业完成情况' '作业完成情况：' --column='学号' --column='作业内容' $(cat "course.d/${course_id}/homework.d/${id}")
                 ;;
             '编辑作业')
-                id=$(dialog-list '编辑作业' '选择作业：' --column='作业号' --column='名称' $(cat "${course_id}/homeworktab"))
+                local id
+                id=$(dialog-list '编辑作业' '选择作业：' --column='作业号' --column='名称' $(cat "course.d/${course_id}/homeworktab"))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
+                local name
                 name=$(dialog-form '编辑作业' "作业号 ${id}" --add-entry='名称')
                 if [[ -z "${name}" ]]; then
                     continue
                 fi
-                if sed -i "s/^${id}	.*$/${id}	${name}/" "${course_id}/homeworktab"; then
+                if sed -i "s/^${id}	.*$/${id}	${name}/" "course.d/${course_id}/homeworktab"; then
                     dialog-info "编辑作业成功"
                 else
                     error "编辑作业失败"
                 fi
                 ;;
             '删除作业')
-                id=$(dialog-list '删除作业' '选择作业：' --column='作业号' --column='名称' $(cat "${course_id}/homeworktab"))
+                local id
+                id=$(dialog-list '删除作业' '选择作业：' --column='作业号' --column='名称' $(cat "course.d/${course_id}/homeworktab"))
                 if [[ -z "${id}" ]]; then
                     continue
                 fi
                 if ! dialog-confirm "确定要删除作业号为 ${id} 的作业么？"; then
                     continue
                 fi
-                if sed -i "/^${id}	.*$/d" "${course_id}/homeworktab" && rm "${course_id}/${id}"; then
+                if sed -i "/^${id}	.*$/d" "course.d/${course_id}/homeworktab" && rm "course.d/${course_id}/homework.d/${id}"; then
                     dialog-info "删除作业成功"
                 else
                     error "删除作业失败"
@@ -563,10 +577,10 @@ teacher-manage-homework() {
 
 teacher-main() {
     while true; do
-        # Read action.
+        # 读取操作
         local action
         action=$(dialog-select '教师操作' '请选择操作：' '管理课程' '管理学生' '管理作业')
-        # Perform action.
+        # 执行操作
         case "${action}" in
             '管理课程')
                 teacher-manage-course
@@ -589,12 +603,66 @@ teacher-main() {
     return 0
 }
 
+# 学生功能
+
+student-main() {
+    while true; do
+        # 读取操作
+        local action
+        action=$(dialog-select '学生操作' '请选择操作：' '查看已完成作业' '查看作业' '提交/编辑作业')
+        # 执行操作
+        case "${action}" in
+            '查看已完成作业')
+                dialog-list '查看已完成作业' '已完成作业：' --column='作业号' $(grep -l "^${username}	" "course.d/${course_id}/homework.d/"* | sed 's|.*/||')
+                ;;
+            '查看作业')
+                local id
+                id=$(dialog-list '选择作业' '作业列表：' --column='作业号' --column='作业内容' $(cat "course.d/${course_id}/homeworktab"))
+                if [[ -z "${id}" ]]; then
+                    continue
+                fi
+                dialog-list '查看作业' '作业：' --column='学号' --column='作业内容' $(grep "^${username}	" "course.d/${course_id}/homework.d/${id}")
+                ;;
+            '提交/编辑作业')
+                local id
+                id=$(dialog-list '选择作业' '作业列表：' --column='作业号' --column='作业内容' $(cat "course.d/${course_id}/homeworktab"))
+                if [[ -z "${id}" ]]; then
+                    continue
+                fi
+                local content
+                if ! content=$(dialog-entry '提交/编辑作业内容' "作业 ${id} 内容"); then
+                    continue
+                fi
+                if grep "^${username}	" "course.d/${course_id}/homework.d/${id}"; then
+                    if sed -i "s/^${username}	[^	]*$/${username}	${content}/" "course.d/${course_id}/homework.d/${id}"; then
+                        dialog-info '编辑作业内容成功'
+                    else
+                        error '编辑作业内容失败'
+                    fi
+                else
+                    echo "${username}	${content}" >>"course.d/${course_id}/homework.d/${id}"
+                    dialog-info '编辑作业内容成功'
+                fi
+                ;;
+            '')
+                break
+                ;;
+            *)
+                error "未预期的操作：\"${action}\""
+                continue
+                ;;
+        esac
+    done
+    return 0
+}
+
+# 主函数
+
 main() {
 
     # Login
-    login
-    if [[ -z "${account_type}" ]]; then
-        return 0
+    if ! login; then
+        exit 1
     fi
 
     # Dispatch
@@ -609,9 +677,12 @@ main() {
             student-main
             ;;
         *)
-            error-exit "未预期的账户类型：\"${account_type}\""
+            error "未预期的账户类型：\"${account_type}\""
+            exit 1
             ;;
     esac
 }
+
+# 脚本入口
 
 main "$@"
